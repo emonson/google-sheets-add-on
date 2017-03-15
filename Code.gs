@@ -272,22 +272,27 @@ function pushDataToCluster(index,index_type,template,data_range_a1,doc_id_range_
         if(!doc_id_data[r][0]) {
           throw "Missing document id for data row: "+(r+1);
         }
-        bulkList.push(JSON.stringify({ "update" : { "_index" : index, "_type" : index_type, "_id" : doc_id_data[r][0], "_retry_on_conflict" : 3 } }));
+//        bulkList.push(JSON.stringify({ "update" : { "_index" : index, "_type" : index_type, "_id" : doc_id_data[r][0], "_retry_on_conflict" : 3 } }));
+//        bulkList.push(JSON.stringify({ doc: toInsert, detect_noop: true, doc_as_upsert: true }));
+//      } else {
+//        bulkList.push(JSON.stringify({ "index" : { "_index" : index, "_type" : index_type } }));
+//        bulkList.push(JSON.stringify(toInsert));
+        bulkList.push(JSON.stringify({ "update" : { "_id" : doc_id_data[r][0], "_retry_on_conflict" : 3 } }));
         bulkList.push(JSON.stringify({ doc: toInsert, detect_noop: true, doc_as_upsert: true }));
       } else {
-        bulkList.push(JSON.stringify({ "index" : { "_index" : index, "_type" : index_type } }));
+        bulkList.push(JSON.stringify({ "index" : { } }));
         bulkList.push(JSON.stringify(toInsert));
       }
       did_send_some_data = true;
       // Don't hit the UrlFetchApp limits of 10MB for POST calls.
       if(bulkList.length >= 2000) {
-        postDataToES(host,bulkList.join("\n")+"\n");
+        postDataToES(host,index,index_type,bulkList.join("\n")+"\n");
         bulkList = [];
       }
     }
   }
   if(bulkList.length > 0) {
-    postDataToES(host,bulkList.join("\n")+"\n");
+    postDataToES(host,index,index_type,bulkList.join("\n")+"\n");
     did_send_some_data = true;
   }
   if(!did_send_some_data) {
@@ -310,6 +315,7 @@ function createTemplate(host,index,template_name) {
   var url = [(host.use_ssl) ? 'https://' : 'http://',
              host.host,':',host.port,
             '/_template/',template_name].join('')
+  Logger.log('template URL');
   Logger.log(url);
   var options = getDefaultOptions(host.username,host.password);
   options['muteHttpExceptions'] = true;
@@ -338,6 +344,8 @@ function createTemplate(host,index,template_name) {
     }
   } else if(resp.getResponseCode() == 200) {
     var jsonResp = JSON.parse(resp.getContentText());
+    Logger.log('200 template response');
+    Logger.log(jsonResp);
     if(jsonResp[template_name].template) {
       var re = new RegExp(jsonResp[template_name].template);
       if(!re.test(index)) {
@@ -354,15 +362,24 @@ function createTemplate(host,index,template_name) {
  * @param {Object} host The set of parameters needed to connect to a cluster - required.
  * @param {Array} data The data to push in an array of JSON strings - required.
  */
-function postDataToES(host,data) {
+function postDataToES(host,index,index_type,data) {
   var url = [(host.use_ssl) ? 'https://' : 'http://',
-             host.host,':',host.port,'/_bulk'].join('');
+             host.host,':',host.port,'/',index,'/',index_type,'/_bulk'].join('');
   var options = getDefaultOptions(host.username,host.password);
   options.method = 'POST';
   options['payload'] = data;
   options.headers["Content-Type"] = "application/json";
   options['muteHttpExceptions'] = true;
   var resp = null;
+  Logger.log('index');
+  Logger.log(index);
+  Logger.log('index_type');
+  Logger.log(index_type);
+  Logger.log('post URL');
+  Logger.log(url);
+  Logger.log('options');
+  Logger.log(options);
+  
   try {
     resp = UrlFetchApp.fetch(url, options);
   } catch(e) {
@@ -370,7 +387,8 @@ function postDataToES(host,data) {
   }
   if(resp.getResponseCode() != 200) {
     var jsonData = JSON.parse(resp.getContentText());
-    if(jsonData.error) {
+    Logger.log(jsonData);
+    if(jsonData.error && jsonData.error.hasOwnProperty('indexOf')) {
       if(jsonData.error.indexOf('AuthenticationException')>=0) {
         throw "The username and/or password is incorrect."
       }
